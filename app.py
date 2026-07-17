@@ -5,6 +5,7 @@ import json
 from io import BytesIO
 from datetime import datetime
 import openpyxl
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 # ---------- 核心处理函数 ----------
 def generate_portrait(json_files, mapping_file, template_file):
@@ -12,7 +13,7 @@ def generate_portrait(json_files, mapping_file, template_file):
     df_try = pd.read_excel(mapping_file)
     if 'A' not in df_try.columns:
         raise ValueError("映射表必须包含 'A' 列")
-    df_try = df_try[['A']].copy()   # 只保留 A 列，去除可能存在的 B 列
+    df_try = df_try[['A']].copy()
 
     # 2. 遍历所有上传的 JSON 文件
     for uploaded_file in json_files:
@@ -78,22 +79,27 @@ def generate_portrait(json_files, mapping_file, template_file):
         result_t = pd.concat([ttl_row, df10], ignore_index=True)
         result_t_deduplicated = result_t.groupby('A', as_index=False).first()
 
-        # 左连接（此时 df_try 没有 'B' 列，merge 后会产生 'B' 列）
+        # 左连接（df_try 不含 'B' 列）
         df_try = pd.merge(df_try, result_t_deduplicated, how='left', on='A')
-        # 将新得到的 'B' 列重命名为文件名
         df_try[name] = df_try['B']
-        # 删除临时 'B' 列，以便下次循环不会冲突
         df_try.drop(columns=['B'], inplace=True)
 
-    # 3. 生成输出文件（基于模板文件）
+    # ---------- 3. 生成输出文件（使用 openpyxl 直接操作） ----------
+    # 加载模板工作簿（template_file 是 UploadedFile 对象，可直接传给 load_workbook）
     wb = openpyxl.load_workbook(template_file)
+    
+    # 如果存在 "1" 工作表则删除
     if "1" in wb.sheetnames:
-        std = wb["1"]
-        wb.remove(std)
-    # 写入新的 "1" 工作表
-    with pd.ExcelWriter(template_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-        writer.book = wb
-        df_try.to_excel(writer, sheet_name="1", index=False)
+        wb.remove(wb["1"])
+    
+    # 创建新工作表 "1"
+    ws = wb.create_sheet("1")
+    
+    # 将 df_try 写入工作表（包含表头）
+    for r in dataframe_to_rows(df_try, index=False, header=True):
+        ws.append(r)
+    
+    # 保存到内存 BytesIO
     output = BytesIO()
     wb.save(output)
     output.seek(0)
@@ -114,7 +120,7 @@ with st.form("upload_form"):
     template_file = st.file_uploader(
         "📄 上传模板文件（多人群画像_模板_3.0.xlsx）", 
         type=["xlsx"],
-        help="此文件必须有一个名为 '1' 的工作表（将被替换）。"
+        help="此文件可以包含多个工作表，程序会替换或创建名为 '1' 的工作表。"
     )
     json_files = st.file_uploader(
         "📁 上传所有 JSON 文件（可多选 .txt）", 
