@@ -6,16 +6,17 @@ from io import BytesIO
 from datetime import datetime
 import openpyxl
 
-# ---------- 核心处理函数（接收文件对象，返回输出文件的字节数据）----------
+# ---------- 核心处理函数 ----------
 def generate_portrait(json_files, mapping_file, template_file):
-    # 1. 读取映射表
+    # 1. 读取映射表，只保留 'A' 列
     df_try = pd.read_excel(mapping_file)
+    if 'A' not in df_try.columns:
+        raise ValueError("映射表必须包含 'A' 列")
+    df_try = df_try[['A']].copy()   # 只保留 A 列，去除可能存在的 B 列
 
-    # 2. 遍历所有上传的 JSON 文件（每个文件是一个 BytesIO 对象）
+    # 2. 遍历所有上传的 JSON 文件
     for uploaded_file in json_files:
-        # 获取文件名（不含扩展名）
         name = uploaded_file.name.replace('.txt', '').replace('-', '_')
-        # 读取 JSON
         raw = pd.read_json(uploaded_file)
         raw_new = raw.explode('snapshotResponseRegions')
 
@@ -58,11 +59,11 @@ def generate_portrait(json_files, mapping_file, template_file):
             'daas_tag_mz_seven_crowd': '美妆七大功效人群'
         }
         result_df_final['tagName'] = result_df_final['tagName'].replace(replace_map)
-        # 特殊处理性别、年龄（可能带后缀）
+        # 特殊处理性别、年龄
         result_df_final.loc[result_df_final['tagName'].str.contains('daas_tag_pred_gender'), 'tagName'] = '性别'
         result_df_final.loc[result_df_final['tagName'].str.contains('daas_tag_pred_age_level'), 'tagName'] = '年龄'
 
-        # 构造 A、B 列
+        # 构造 A、B 列（A = 标签名+数值名，B = rate）
         df10 = result_df_final[['tagName', 'tagValueName', 'rate']].copy()
         df10.columns = ['A', 'B', 'C']
         df10['A'] = df10['A'] + df10['B']
@@ -77,22 +78,22 @@ def generate_portrait(json_files, mapping_file, template_file):
         result_t = pd.concat([ttl_row, df10], ignore_index=True)
         result_t_deduplicated = result_t.groupby('A', as_index=False).first()
 
-        # 左连接映射表
+        # 左连接（此时 df_try 没有 'B' 列，merge 后会产生 'B' 列）
         df_try = pd.merge(df_try, result_t_deduplicated, how='left', on='A')
-        df_try[name] = df_try['B']   # 以原始文件名（不带扩展名）作为新列名
+        # 将新得到的 'B' 列重命名为文件名
+        df_try[name] = df_try['B']
+        # 删除临时 'B' 列，以便下次循环不会冲突
+        df_try.drop(columns=['B'], inplace=True)
 
     # 3. 生成输出文件（基于模板文件）
-    # 用 openpyxl 加载模板工作簿
     wb = openpyxl.load_workbook(template_file)
-    # 将 df_try 写入 "1" 工作表（先删除原有，再添加）
     if "1" in wb.sheetnames:
         std = wb["1"]
         wb.remove(std)
-    # 创建一个新的工作表 "1"
+    # 写入新的 "1" 工作表
     with pd.ExcelWriter(template_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
         writer.book = wb
         df_try.to_excel(writer, sheet_name="1", index=False)
-    # 保存到内存 BytesIO
     output = BytesIO()
     wb.save(output)
     output.seek(0)
@@ -124,7 +125,6 @@ with st.form("upload_form"):
     submitted = st.form_submit_button("🚀 开始生成画像")
 
 if submitted:
-    # 检查是否完整上传
     if mapping_file is None:
         st.error("请上传映射表文件！")
     elif template_file is None:
@@ -135,7 +135,6 @@ if submitted:
         with st.spinner("正在处理，请稍候..."):
             try:
                 output_bytes = generate_portrait(json_files, mapping_file, template_file)
-                # 生成文件名（带时间戳）
                 now = datetime.now()
                 out_filename = now.strftime("%Y%m%d_%H%M%S") + ".xlsx"
                 st.success("✅ 生成成功！点击下方按钮下载结果。")
@@ -147,4 +146,4 @@ if submitted:
                 )
             except Exception as e:
                 st.error(f"运行出错：{e}")
-                st.exception(e)  # 显示详细错误，方便调试
+                st.exception(e)
