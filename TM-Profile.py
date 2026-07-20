@@ -116,7 +116,7 @@ def generate_portrait(json_files):
 
 # ---------- Streamlit UI ----------
 st.set_page_config(page_title="人群画像生成器", layout="centered")
-st.title("🧑‍🤝‍🧑 人群画像轻量生成器")
+st.title("🧑‍🤝‍🧑 TM-人群画像轻量生成器")
 
 st.markdown("""
 **使用说明：**
