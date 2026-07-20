@@ -10,15 +10,17 @@ import os
 
 # ---------- 核心处理函数 ----------
 def generate_portrait(json_files):
-    # 1. 固定从仓库根目录读取映射表和模板（与 app.py 同级）
-    mapping_path = 'data/try_3.0.xlsx'
-    template_path = 'data/多人群画像_模板_3.0.xlsx'
+    # 获取当前脚本所在目录，然后拼接 data 子目录
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(base_dir, 'data')
+    mapping_path = os.path.join(data_dir, 'try_3.0.xlsx')
+    template_path = os.path.join(data_dir, '多人群画像_模板_3.0.xlsx')
     
-    # 检查文件是否存在（方便调试）
     if not os.path.exists(mapping_path):
-        raise FileNotFoundError(f"映射表文件 '{mapping_path}' 未找到，请确认已上传到仓库根目录")
+        raise FileNotFoundError(f"映射表文件未找到: {mapping_path}")
     if not os.path.exists(template_path):
-        raise FileNotFoundError(f"模板文件 '{template_path}' 未找到，请确认已上传到仓库根目录")
+        raise FileNotFoundError(f"模板文件未找到: {template_path}")
+    # ... 后续代码不变
     
     # 读取映射表，只保留 'A' 列
     df_try = pd.read_excel(mapping_path)
