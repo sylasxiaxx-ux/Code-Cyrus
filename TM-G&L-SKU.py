@@ -8,7 +8,7 @@ import os
 
 # ---------- 页面配置 ----------
 st.set_page_config(page_title="品牌/单品流入流出净值分析", layout="wide")
-st.title("📊 品牌/单品流入流出净值分析（含单品昵称匹配）")
+st.title("📊 品牌/单品流入流出净值分析")
 
 # ---------- 初始化 session_state ----------
 if "id_nickname_df" not in st.session_state:
