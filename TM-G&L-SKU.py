@@ -288,12 +288,12 @@ def compute_item_net_with_nickname(item_inflow, item_outflow, id_nickname_df):
 
 # ---------- 加载默认映射表（如果未上传） ----------
 def load_default_mapping():
-    default_path = "data/id匹配_0723updated.xlsx"
+    default_path = "data/竞品id匹配_0723updated.xlsx"
     if os.path.exists(default_path):
         try:
             df = pd.read_excel(default_path)
             # 检查必须列
-            required_cols = ['ID', '类目', 'nickname']
+            required_cols = ['id', '类目', 'nickname']
             if all(col in df.columns for col in required_cols):
                 df = df[required_cols].copy()
                 df['id'] = df['id'].astype(str)
@@ -307,7 +307,7 @@ def load_default_mapping():
             st.warning(f"读取默认映射表失败: {e}")
             return False
     else:
-        st.info("未找到默认映射表 data/id匹配_0723updated.xlsx，请上传映射表。")
+        st.info("未找到默认映射表 data/竞品id匹配_0723updated.xlsx，请上传映射表。")
         return False
 
 # ---------- 主界面布局 ----------
