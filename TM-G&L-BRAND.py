@@ -176,10 +176,10 @@ with col2:
     inflow_qty = st.number_input("流入总人数 (inflow_qty)", value=0, step=1000, min_value=0)
 
 # 四个 JSON 文本框（留空）
-json1 = st.text_area("📄 品牌流失 JSON", height=50, placeholder="粘贴品牌流失的 JSON 数据...")
-json2 = st.text_area("📄 商品流失 JSON", height=50, placeholder="粘贴商品流失的 JSON 数据...")
-json3 = st.text_area("📄 品牌流入 JSON", height=50, placeholder="粘贴品牌流入的 JSON 数据...")
-json4 = st.text_area("📄 商品流入 JSON", height=50, placeholder="粘贴商品流入的 JSON 数据...")
+json1 = st.text_area("📄 品牌流失 JSON", height=25, placeholder="粘贴品牌流失的 JSON 数据...")
+json2 = st.text_area("📄 商品流失 JSON", height=25, placeholder="粘贴商品流失的 JSON 数据...")
+json3 = st.text_area("📄 品牌流入 JSON", height=25, placeholder="粘贴品牌流入的 JSON 数据...")
+json4 = st.text_area("📄 商品流入 JSON", height=25, placeholder="粘贴商品流入的 JSON 数据...")
 
 if st.button("运行分析", type="primary"):
     # 检查必填项
