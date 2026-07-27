@@ -11,7 +11,7 @@ import os
 # ---------- 核心处理函数 ----------
 def generate_portrait(json_files):
     # 获取当前脚本所在目录，然后拼接 data 子目录
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 向上退一级，到达项目根目录
     data_dir = os.path.join(base_dir, 'data')
     mapping_path = os.path.join(data_dir, 'try_3.0.xlsx')
     template_path = os.path.join(data_dir, '多人群画像_模板_3.0.xlsx')
