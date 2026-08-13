@@ -7,6 +7,28 @@ from datetime import datetime
 import openpyxl
 from openpyxl.utils.dataframe import dataframe_to_rows
 import os
+import streamlit as st
+
+# 页面配置
+st.set_page_config(
+    page_title="人群画像生成器",
+    layout="centered",
+    initial_sidebar_state="collapsed"   # 默认折叠侧边栏
+)
+
+# ---------- 隐藏侧边栏导航菜单 ----------
+st.markdown(
+    """
+    <style>
+        [data-testid="stSidebarNav"] {
+            display: none !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# 以下是你原有的代码...
 
 # ---------- 核心处理函数 ----------
 def generate_portrait(json_files):
@@ -116,7 +138,7 @@ def generate_portrait(json_files):
 
 
 # ---------- Streamlit UI ----------
-st.set_page_config(page_title="人群画像生成器", layout="centered")
+st.set_page_config(page_title="UL-人群画像生成器", layout="centered")
 st.title("🧑‍🤝‍🧑 TM-人群画像轻量生成器")
 
 st.markdown("""
