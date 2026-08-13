@@ -70,7 +70,7 @@ def generate_portrait(json_files):
             'pref_skincare': '护肤品功效需求',
             'daas_tag_kx_crowd_name': '十大策略人群',
             'pref_cosmetics': '彩妆功效需求',
-            'daas_tag_mz_seven_crowd': '美妆七大功效人群'，
+            'daas_tag_mz_seven_crowd': '美妆七大功效人群',
             'daas_tag_pred_life_stage_v2_databank':'预测人生阶段'
         }
         result_df_final['tagName'] = result_df_final['tagName'].replace(replace_map)
