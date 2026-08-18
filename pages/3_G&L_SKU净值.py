@@ -5,6 +5,7 @@ import json
 from io import BytesIO
 import openpyxl
 import os
+from datetime import datetime
 
 # ---------- 页面配置 ----------
 st.set_page_config(page_title="品牌/单品流入流出净值分析", layout="wide")
@@ -403,10 +404,8 @@ if st.session_state.computed_tables is not None:
             if st.session_state.id_nickname_df is not None:
                 ref_df = st.session_state.id_nickname_df[['类目', 'nickname']].drop_duplicates().sort_values(['类目', 'nickname'])
                 
-                # 关键词搜索框（品牌名）
                 keyword = st.text_input("🔍 输入品牌名（或关键词）搜索 nickname", placeholder="例如：雅诗兰黛")
                 
-                # 类目多选
                 all_categories = sorted(ref_df['类目'].unique())
                 selected_categories = st.multiselect(
                     "选择类目（空选则显示全部）",
@@ -415,7 +414,6 @@ if st.session_state.computed_tables is not None:
                     key="category_filter"
                 )
                 
-                # 应用过滤
                 if selected_categories:
                     filtered_df = ref_df[ref_df['类目'].isin(selected_categories)]
                 else:
@@ -481,7 +479,7 @@ if st.session_state.computed_tables is not None:
                     st.session_state.computed_tables['df_item_net'] = df_item_net
                     st.session_state.computed_tables['unmatched'] = unmatched_new
                     st.session_state.unmatched_df = unmatched_new
-                    st.success("映射已更新并重新计算完成！请查看下方结果。")
+                    st.success(f"✅ 映射已更新！当前映射表共 {len(updated)} 条记录（新增 {len(new_mappings)} 条）。")
                     st.rerun()
                 else:
                     st.error("原始数据丢失，请重新运行分析。")
@@ -512,10 +510,13 @@ if st.session_state.computed_tables is not None:
         st.markdown("---")
         st.subheader("📥 下载最新映射表")
         st.info("点击下方按钮可下载当前使用的完整映射表（包含所有已补充的 nickname），以便下次直接上传。")
+        st.caption(f"📌 当前映射表共 {len(st.session_state.id_nickname_df)} 条记录（包含您补充的 nickname）。")
         
         export_df = st.session_state.id_nickname_df.copy()
+        # 确保列名统一
         if 'id' not in export_df.columns:
             export_df = export_df.rename(columns={'ID':'id'})
+        # 只保留三列
         export_df = export_df[['id', '类目', 'nickname']]
         export_df = export_df.sort_values(by=['类目', 'nickname']).reset_index(drop=True)
 
@@ -523,9 +524,12 @@ if st.session_state.computed_tables is not None:
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             export_df.to_excel(writer, index=False, sheet_name='映射表')
         output.seek(0)
+        
+        # 文件名加入时间戳，避免浏览器缓存
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         st.download_button(
             label="📥 下载映射表 (Excel)",
             data=output,
-            file_name="竞品id匹配_updated.xlsx",
+            file_name=f"竞品id匹配_updated_{timestamp}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
