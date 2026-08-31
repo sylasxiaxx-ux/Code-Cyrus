@@ -53,14 +53,7 @@ def parse_population_file(file):
     if header_row_idx is None:
         raise ValueError("未找到表头行（包含'标签名'）")
 
-    # 表头：通常为 标签名, 枚举值, 占比, TGI
-    headers = df_all.iloc[header_row_idx].tolist()
-    # 标准化列索引
-    col_tag = 0
-    col_val = 1
-    col_pct = 2
-    # 可能列名有微小差异，但基本位置固定
-
+    # 表头通常为 标签名, 枚举值, 占比, TGI
     # 数据从表头下一行开始
     data_rows = df_all.iloc[header_row_idx+1:].reset_index(drop=True)
 
@@ -69,16 +62,15 @@ def parse_population_file(file):
     current_tag = None
 
     for _, row in data_rows.iterrows():
-        tag_cell = str(row[col_tag]).strip()
-        val_cell = str(row[col_val]).strip()
-        pct_cell = str(row[col_pct]).strip()
+        tag_cell = str(row[0]).strip()
+        val_cell = str(row[1]).strip()
+        pct_cell = str(row[2]).strip()
 
         # 如果标签名非空，更新当前标签
         if tag_cell != "":
             current_tag = tag_cell
-            # 即使当前行有枚举值，也一起处理（某些文件可能标签和枚举值在同一行）
+            # 如果当前行有枚举值，也一并处理
             if val_cell != "" and pct_cell != "":
-                # 尝试转为数值
                 try:
                     pct_val = float(pct_cell)
                 except:
@@ -151,7 +143,6 @@ if uploaded_files and st.button("🚀 生成汇总"):
         st.stop()
 
     # 第二步：构建完整枚举值列表（按标签）
-    # 为了保持顺序，我们按标签顺序，枚举值按字母排序（可调整）
     tag_enum_map = {}
     for tag in KEEP_TAGS:
         if tag in all_enum_values:
@@ -186,10 +177,12 @@ if uploaded_files and st.button("🚀 生成汇总"):
                 if row_key in df_result.index:
                     df_result.loc[row_key, pop_name] = pct
 
-    # 为了便于查看，将索引拆分为“标签名”和“枚举值”两列
-    df_output = df_result.reset_index().rename(columns={"index": "标签:枚举值"})
+    # 将索引拆分为“标签名”和“枚举值”两列
+    df_output = df_result.reset_index()
     # 拆分列
-    df_output[["标签名", "枚举值"]] = df_output["标签:枚举值"].str.split(":", expand=True)
+    df_output[["标签名", "枚举值"]] = df_output["index"].str.split(":", expand=True)
+    # 删除原索引列
+    df_output = df_output.drop(columns=["index"])
     # 重新排列列顺序
     cols = ["标签名", "枚举值"] + list(all_populations.keys())
     df_output = df_output[cols]
@@ -198,8 +191,6 @@ if uploaded_files and st.button("🚀 生成汇总"):
     # 将标签名转为分类，按KEEP_TAGS顺序
     df_output["标签名"] = pd.Categorical(df_output["标签名"], categories=KEEP_TAGS, ordered=True)
     df_output = df_output.sort_values(["标签名", "枚举值"]).reset_index(drop=True)
-    # 删除临时列
-    df_output = df_output.drop(columns=["标签:枚举值"])
 
     st.success(f"汇总完成！共 {len(all_populations)} 个人群。")
 
