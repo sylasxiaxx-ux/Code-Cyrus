@@ -48,19 +48,28 @@ def load_default_mapping():
         st.info("未找到默认映射表 data/竞品id匹配_0723updated.xlsx，请上传映射表。")
         return False
 
-# ---------- 通用 JSON 解析函数 ----------
-def parse_preference_json(json_str, required_fields, value_candidates):
+# ---------- 增强的 JSON 解析函数 ----------
+def parse_preference_json(json_str, require_item=True):
+    """
+    解析品牌或单品 JSON，支持从 datas 或 axises 中提取字段。
+    返回 (DataFrame, value_field_name) 或 (None, None)
+    """
     try:
         data = json.loads(json_str)
     except json.JSONDecodeError:
         st.error("JSON 格式错误，请检查语法。")
         return None, None
 
-    datas = data.get('datas')
-    if datas is None:
-        st.error("JSON 中缺少 'datas' 字段。")
+    body = data.get('body')
+    if body is None:
+        st.error("JSON 中缺少 'body' 字段。")
         return None, None
 
+    # 从 body 中提取 datas 和 axises
+    datas = body.get('datas', [])
+    axises = body.get('axises', [])
+
+    # 构建字段字典：先从 datas 中提取
     field_dict = {}
     for item in datas:
         name = item.get('name')
@@ -68,30 +77,71 @@ def parse_preference_json(json_str, required_fields, value_candidates):
         if name and values is not None:
             field_dict[name] = values
 
+    # 再从 axises 中提取（如果 datas 中已存在则不覆盖，但 axises 中通常有额外字段）
+    for axis in axises:
+        name = axis.get('name')
+        values = axis.get('values')
+        if name and values is not None and name not in field_dict:
+            # axises 的 values 结构可能是 [{"key":..., "showName":...}, ...]
+            # 我们需要提取 key 或 showName？通常 key 是实际值。
+            # 检查第一个元素是否为字典
+            if values and isinstance(values[0], dict):
+                # 提取 key 或 showName，优先 key
+                extracted = []
+                for v in values:
+                    if 'key' in v and v['key'] is not None:
+                        extracted.append(v['key'])
+                    elif 'showName' in v:
+                        extracted.append(v['showName'])
+                    else:
+                        extracted.append(None)
+                field_dict[name] = extracted
+            else:
+                field_dict[name] = values
+
+    # 检查必须字段
+    required_fields = ['brand_name', 'sum_byr_cnt']  # 品牌汇总只需要品牌名和数值
+    if require_item:
+        required_fields += ['item_name', 'item_id']   # 单品需要单品名和ID
+
     missing = [f for f in required_fields if f not in field_dict]
     if missing:
-        st.error(f"缺少必要字段: {missing}")
+        st.error(f"JSON 中缺少必要字段: {missing}。请检查文件结构。")
         return None, None
 
+    # 检查数值字段（可能叫 sum_byr_cnt 或 purchase_byr_tb_ratio 或 preference_value）
+    value_candidates = ['sum_byr_cnt', 'purchase_byr_tb_ratio', 'preference_value', 'value']
     value_field = None
     for cand in value_candidates:
         if cand in field_dict:
             value_field = cand
             break
     if value_field is None:
-        st.error(f"未找到数值字段（尝试: {', '.join(value_candidates)}）")
+        st.error(f"未找到数值字段（尝试了: {', '.join(value_candidates)}）")
         return None, None
 
     # 构建 DataFrame
-    df = pd.DataFrame({
+    df_data = {
         '品牌名': field_dict['brand_name'],
-        '单品': field_dict['item_name'],
-        'ID': field_dict['item_id'],
         '偏好值': field_dict[value_field]
-    })
+    }
+    if require_item:
+        df_data['单品'] = field_dict['item_name']
+        df_data['ID'] = field_dict['item_id']
+
+    df = pd.DataFrame(df_data)
     df['偏好值'] = pd.to_numeric(df['偏好值'], errors='coerce')
-    df = df[df['单品'] != '-']
-    df = df.drop_duplicates(subset=['ID', '单品', '品牌名'], keep='first')
+
+    # 如果有单品列，过滤掉单品名为 '-' 的行
+    if require_item and '单品' in df.columns:
+        df = df[df['单品'] != '-']
+
+    # 去重
+    if require_item:
+        df = df.drop_duplicates(subset=['ID', '单品', '品牌名'], keep='first')
+    else:
+        df = df.drop_duplicates(subset=['品牌名'], keep='first')
+
     df.index = pd.RangeIndex(start=1, stop=len(df)+1)
     return df, value_field
 
@@ -132,14 +182,14 @@ with st.expander("📥 输入数据", expanded=True):
     brand_json = st.text_area(
         "📄 品牌偏好 JSON（可选，用于品牌汇总）",
         height=150,
-        placeholder='粘贴品牌级别的 JSON，需包含 "brand_name", "item_name", "item_id" 及数值字段...',
+        placeholder='粘贴品牌级别的 JSON（需包含 brand_name 和 sum_byr_cnt）',
         key="brand_json_two"
     )
 
     item_json = st.text_area(
         "📄 单品偏好 JSON（必填，用于单品明细及 nickname 汇总）",
         height=200,
-        placeholder='粘贴单品级别的 JSON，需包含 "brand_name", "item_name", "item_id" 及数值字段...',
+        placeholder='粘贴单品级别的 JSON（需包含 brand_name, item_name, item_id 和 sum_byr_cnt）',
         key="item_json_two"
     )
 
@@ -179,12 +229,17 @@ if run_btn:
     elif st.session_state.id_nickname_df is None:
         st.error("请上传映射表或确保 data/竞品id匹配_0723updated.xlsx 存在。")
     else:
+        # 解析品牌 JSON（如果有）
+        brand_agg = None
+        if brand_json.strip():
+            df_brand, value_field_brand = parse_preference_json(brand_json, require_item=False)
+            if df_brand is not None:
+                if total_qty > 1:
+                    df_brand['偏好值'] = df_brand['偏好值'] / total_qty
+                brand_agg = brand_aggregate(df_brand, "占比" if total_qty > 1 else "偏好值")
+
         # 解析单品 JSON
-        df_item, value_field_item = parse_preference_json(
-            item_json,
-            required_fields=['brand_name', 'item_name', 'item_id'],
-            value_candidates=['sum_byr_cnt', 'purchase_byr_tb_ratio', 'preference_value', 'value']
-        )
+        df_item, value_field_item = parse_preference_json(item_json, require_item=True)
         if df_item is None:
             st.stop()
 
@@ -199,20 +254,7 @@ if run_btn:
         merged_item, unmatched = match_nickname(df_item, st.session_state.id_nickname_df)
         agg_nickname = aggregate_by_nickname(merged_item)
 
-        # 品牌汇总：优先从品牌 JSON 获取
-        brand_agg = None
-        if brand_json.strip():
-            df_brand, _ = parse_preference_json(
-                brand_json,
-                required_fields=['brand_name', 'item_name', 'item_id'],
-                value_candidates=['sum_byr_cnt', 'purchase_byr_tb_ratio', 'preference_value', 'value']
-            )
-            if df_brand is not None:
-                if total_qty > 1:
-                    df_brand['偏好值'] = df_brand['偏好值'] / total_qty
-                brand_agg = brand_aggregate(df_brand, value_label)
-
-        # 如果品牌 JSON 未提供或解析失败，则从单品数据聚合
+        # 如果品牌 JSON 未提供，则从单品数据聚合品牌
         if brand_agg is None:
             brand_agg = brand_aggregate(df_item, value_label)
 
@@ -315,7 +357,6 @@ if st.session_state.computed_tables is not None:
                     df_item = st.session_state.raw_dfs['df_item']
                     merged_new, unmatched_new = match_nickname(df_item, updated)
                     agg_new = aggregate_by_nickname(merged_new)
-                    # 品牌汇总更新（如果品牌 JSON 存在则重新解析，但为了简化，我们重新从 raw 中取 brand_agg，但可能需要重新计算，不复杂，我们简单处理：从单品聚合）
                     brand_new = brand_aggregate(df_item, value_label)
                     st.session_state.computed_tables = {
                         'df_item': df_item,
