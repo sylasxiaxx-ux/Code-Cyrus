@@ -144,25 +144,60 @@ def match_nickname(df, id_nickname_df):
     return merged, unmatched
 
 # ---------- 按 nickname 汇总 ----------
-def aggregate_by_nickname(merged_df, value_col):
+def aggregate_by_nickname(merged_df, has_ratio):
     clean = merged_df[~merged_df['nickname'].isna() & (merged_df['nickname'] != '-')]
     if clean.empty:
-        return pd.DataFrame(columns=['nickname', f'总{value_col}'])
-    agg = clean.groupby('nickname', as_index=False)[value_col].sum().rename(columns={value_col: f'总{value_col}'})
-    agg = agg.sort_values(f'总{value_col}', ascending=False)
+        if has_ratio:
+            return pd.DataFrame(columns=['nickname', '总人数', '总占比'])
+        else:
+            return pd.DataFrame(columns=['nickname', '总人数'])
+    agg = clean.groupby('nickname', as_index=False).agg({
+        '人数': 'sum'
+    }).rename(columns={'人数': '总人数'})
+    if has_ratio:
+        # 计算总占比 = 总人数 / 总总人数（但这里没有总总人数，只能从原始占比求平均？逻辑错误）
+        # 正确做法：总占比 = 总人数 / 总总人数，但总总人数是外部参数，我们无法在聚合中直接得到。
+        # 这里应该先计算每个nickname的总人数，然后除以总总人数（total_qty * 总品牌？）
+        # 或者直接使用占比列求和？但占比是每个单品的占比，汇总后应该是人数汇总占比。
+        # 为了简单，我们只提供总人数，占比由用户自行计算。
+        # 但用户希望有占比列，我们可以保留占比列不聚合，但汇总时应该加权平均或求和？
+        # 由于占比已经由（人数/总人数）得到，总占比应该是总人数/总总人数。
+        # 所以我们再额外计算总占比 = 总人数 / total_qty（但 total_qty 是全局总人数，不是每个nickname的基数）
+        # 对于每个nickname，总占比 = 该nickname的总人数 / 总总人数，但总总人数是输入的总人数，而单品的总人数可能超过输入的总人数？可能因为重复计数。
+        # 这里我们简化：保持占比列不聚合，只显示每个nickname的总人数和平均占比（或总占比）。
+        # 实际上，原始数据中的“人数”已经是去重后的用户数，总人数是整体用户数，所以总占比应该是总人数/整体用户数。
+        # 因此我们直接计算 agg['总占比'] = agg['总人数'] / total_qty（但 total_qty 是外部参数，我们需要传入）。
+        # 由于这里没有 total_qty 参数，我们可以在函数外计算。
+        pass
+    # 重新设计：在调用此函数时，我们传入 total_qty，并在函数内计算总占比。
+    return agg
+
+# 修正：重写 aggregate_by_nickname 接受 total_qty 参数
+def aggregate_by_nickname_with_qty(merged_df, total_qty, has_ratio):
+    clean = merged_df[~merged_df['nickname'].isna() & (merged_df['nickname'] != '-')]
+    if clean.empty:
+        if has_ratio:
+            return pd.DataFrame(columns=['nickname', '总人数', '总占比'])
+        else:
+            return pd.DataFrame(columns=['nickname', '总人数'])
+    agg = clean.groupby('nickname', as_index=False)['人数'].sum().rename(columns={'人数': '总人数'})
+    if has_ratio:
+        agg['总占比'] = agg['总人数'] / total_qty
+    agg = agg.sort_values('总人数', ascending=False)
     agg.index = pd.RangeIndex(start=1, stop=len(agg)+1)
     return agg
 
-# ---------- 品牌汇总 ----------
-def brand_aggregate(df, value_col):
-    brand_agg = df.groupby('品牌名', as_index=False)[value_col].sum().rename(columns={value_col: f'总{value_col}'})
-    brand_agg = brand_agg.sort_values(f'总{value_col}', ascending=False)
+def brand_aggregate_with_qty(df, total_qty, has_ratio):
+    brand_agg = df.groupby('品牌名', as_index=False)['人数'].sum().rename(columns={'人数': '总人数'})
+    if has_ratio:
+        brand_agg['总占比'] = brand_agg['总人数'] / total_qty
+    brand_agg = brand_agg.sort_values('总人数', ascending=False)
     brand_agg.index = pd.RangeIndex(start=1, stop=len(brand_agg)+1)
     return brand_agg
 
 # ---------- 主界面 ----------
 with st.expander("📥 输入数据", expanded=True):
-    total_qty = st.number_input("总人数（可选，用于计算占比）", min_value=0, value=1, step=1000, help="输入总人数后，人数将除以总人数得到占比。若不需缩放，保持默认1。")
+    total_qty = st.number_input("总人数（可选，用于计算占比）", min_value=0, value=1, step=1000, help="输入总人数后，将增加占比列（人数/总人数）。若不需占比，保持默认1。")
 
     brand_json = st.text_area(
         "📄 品牌偏好 JSON（可选，用于品牌汇总）",
@@ -219,35 +254,27 @@ if run_btn:
         if brand_json.strip():
             df_brand, value_field_brand = parse_preference_json(brand_json, require_item=False)
             if df_brand is not None:
-                if total_qty > 1:
-                    # 缩放并重命名列
-                    df_brand['人数'] = df_brand['人数'] / total_qty
-                    df_brand = df_brand.rename(columns={'人数': '占比'})
-                    value_col_brand = "占比"
-                else:
-                    value_col_brand = "人数"
-                brand_agg = brand_aggregate(df_brand, value_col_brand)
+                # 计算占比（如果 total_qty > 1）
+                has_ratio = total_qty > 1
+                brand_agg = brand_aggregate_with_qty(df_brand, total_qty, has_ratio)
 
         # 解析单品 JSON
         df_item, value_field_item = parse_preference_json(item_json, require_item=True)
         if df_item is None:
             st.stop()
 
-        # 确定数值列名（人数或占比），并缩放 + 重命名
-        if total_qty > 1:
-            df_item['人数'] = df_item['人数'] / total_qty
-            df_item = df_item.rename(columns={'人数': '占比'})
-            value_col = "占比"
-        else:
-            value_col = "人数"
+        # 计算占比（如果 total_qty > 1）
+        has_ratio = total_qty > 1
+        if has_ratio:
+            df_item['占比'] = df_item['人数'] / total_qty
 
         # 匹配 nickname
         merged_item, unmatched = match_nickname(df_item, st.session_state.id_nickname_df)
-        agg_nickname = aggregate_by_nickname(merged_item, value_col)
+        agg_nickname = aggregate_by_nickname_with_qty(merged_item, total_qty, has_ratio)
 
         # 如果品牌 JSON 未提供，则从单品数据聚合品牌
         if brand_agg is None:
-            brand_agg = brand_aggregate(df_item, value_col)
+            brand_agg = brand_aggregate_with_qty(df_item, total_qty, has_ratio)
 
         # 保存结果
         st.session_state.raw_dfs = {
@@ -255,7 +282,8 @@ if run_btn:
             'merged_item': merged_item,
             'agg_nickname': agg_nickname,
             'brand_agg': brand_agg,
-            'value_col': value_col
+            'has_ratio': has_ratio,
+            'total_qty': total_qty
         }
         st.session_state.unmatched_df = unmatched
         st.session_state.computed_tables = {
@@ -264,7 +292,7 @@ if run_btn:
             'agg_nickname': agg_nickname,
             'brand_agg': brand_agg,
             'unmatched': unmatched,
-            'value_col': value_col
+            'has_ratio': has_ratio
         }
         st.success(f"分析完成！单品记录 {len(df_item)} 条。")
 
@@ -275,7 +303,7 @@ if st.session_state.computed_tables is not None:
     merged_item = tables['merged_item']
     agg_nickname = tables['agg_nickname']
     brand_agg = tables['brand_agg']
-    value_col = tables.get('value_col', '人数')   # 默认 '人数'
+    has_ratio = tables.get('has_ratio', False)
 
     # 未匹配编辑区域
     if len(unmatched) > 0:
@@ -346,16 +374,18 @@ if st.session_state.computed_tables is not None:
 
                 if st.session_state.raw_dfs is not None:
                     df_item = st.session_state.raw_dfs['df_item']
+                    total_qty = st.session_state.raw_dfs['total_qty']
+                    has_ratio = st.session_state.raw_dfs['has_ratio']
                     merged_new, unmatched_new = match_nickname(df_item, updated)
-                    agg_new = aggregate_by_nickname(merged_new, value_col)
-                    brand_new = brand_aggregate(df_item, value_col)
+                    agg_new = aggregate_by_nickname_with_qty(merged_new, total_qty, has_ratio)
+                    brand_new = brand_aggregate_with_qty(df_item, total_qty, has_ratio)
                     st.session_state.computed_tables = {
                         'df_item': df_item,
                         'merged_item': merged_new,
                         'agg_nickname': agg_new,
                         'brand_agg': brand_new,
                         'unmatched': unmatched_new,
-                        'value_col': value_col
+                        'has_ratio': has_ratio
                     }
                     st.session_state.unmatched_df = unmatched_new
                     st.success(f"✅ 映射已更新！当前映射表共 {len(updated)} 条记录（新增 {len(new_mappings)} 条）。")
@@ -364,15 +394,23 @@ if st.session_state.computed_tables is not None:
                     st.error("原始数据丢失，请重新运行分析。")
 
     # 显示结果
-    st.subheader(f"📊 品牌汇总（按总{value_col}降序）")
-    st.dataframe(brand_agg)
+    st.subheader("📊 品牌汇总")
+    if has_ratio:
+        st.dataframe(brand_agg[['品牌名', '总人数', '总占比']])
+    else:
+        st.dataframe(brand_agg[['品牌名', '总人数']])
 
     st.subheader("🛍️ 单品明细（含 nickname）")
-    # 列名动态：value_col 可能是 "人数" 或 "占比"
-    st.dataframe(merged_item[['品牌名', '单品', 'nickname', value_col, 'ID']])
+    if has_ratio:
+        st.dataframe(merged_item[['品牌名', '单品', 'nickname', '人数', '占比', 'ID']])
+    else:
+        st.dataframe(merged_item[['品牌名', '单品', 'nickname', '人数', 'ID']])
 
-    st.subheader(f"📈 按 nickname 汇总（总{value_col}）")
-    st.dataframe(agg_nickname)
+    st.subheader("📈 按 nickname 汇总")
+    if has_ratio:
+        st.dataframe(agg_nickname[['nickname', '总人数', '总占比']])
+    else:
+        st.dataframe(agg_nickname[['nickname', '总人数']])
 
     if len(unmatched) == 0:
         st.success("✅ 所有单品均已匹配到nickname！")
