@@ -143,7 +143,7 @@ def match_nickname(df, id_nickname_df):
     return merged, unmatched
 
 # ---------- 按 nickname 汇总 ----------
-def aggregate_by_nickname_with_qty(merged_df, total_qty, has_ratio):
+def aggregate_by_nickname(merged_df, total_qty, has_ratio):
     clean = merged_df[~merged_df['nickname'].isna() & (merged_df['nickname'] != '-')]
     if clean.empty:
         if has_ratio:
@@ -151,15 +151,15 @@ def aggregate_by_nickname_with_qty(merged_df, total_qty, has_ratio):
         else:
             return pd.DataFrame(columns=['nickname', '总人数'])
     agg = clean.groupby('nickname', as_index=False)['人数'].sum().rename(columns={'人数': '总人数'})
-    if has_ratio:
+    if has_ratio and total_qty > 0:
         agg['总占比'] = agg['总人数'] / total_qty
     agg = agg.sort_values('总人数', ascending=False)
     agg.index = pd.RangeIndex(start=1, stop=len(agg)+1)
     return agg
 
-def brand_aggregate_with_qty(df, total_qty, has_ratio):
+def brand_aggregate(df, total_qty, has_ratio):
     brand_agg = df.groupby('品牌名', as_index=False)['人数'].sum().rename(columns={'人数': '总人数'})
-    if has_ratio:
+    if has_ratio and total_qty > 0:
         brand_agg['总占比'] = brand_agg['总人数'] / total_qty
     brand_agg = brand_agg.sort_values('总人数', ascending=False)
     brand_agg.index = pd.RangeIndex(start=1, stop=len(brand_agg)+1)
@@ -225,7 +225,7 @@ if run_btn:
             df_brand, value_field_brand = parse_preference_json(brand_json, require_item=False)
             if df_brand is not None:
                 has_ratio = total_qty > 1
-                brand_agg = brand_aggregate_with_qty(df_brand, total_qty, has_ratio)
+                brand_agg = brand_aggregate(df_brand, total_qty, has_ratio)
 
         # 解析单品 JSON
         df_item, value_field_item = parse_preference_json(item_json, require_item=True)
@@ -233,16 +233,17 @@ if run_btn:
             st.stop()
 
         has_ratio = total_qty > 1
+        # 计算占比（仅当 total_qty > 1）
         if has_ratio:
             df_item['占比'] = df_item['人数'] / total_qty
 
         # 匹配 nickname
         merged_item, unmatched = match_nickname(df_item, st.session_state.id_nickname_df)
-        agg_nickname = aggregate_by_nickname_with_qty(merged_item, total_qty, has_ratio)
+        agg_nickname = aggregate_by_nickname(merged_item, total_qty, has_ratio)
 
         # 如果品牌 JSON 未提供，则从单品数据聚合品牌
         if brand_agg is None:
-            brand_agg = brand_aggregate_with_qty(df_item, total_qty, has_ratio)
+            brand_agg = brand_aggregate(df_item, total_qty, has_ratio)
 
         # 保存结果
         st.session_state.raw_dfs = {
@@ -260,8 +261,7 @@ if run_btn:
             'agg_nickname': agg_nickname,
             'brand_agg': brand_agg,
             'unmatched': unmatched,
-            'has_ratio': has_ratio,
-            'total_qty': total_qty
+            'has_ratio': has_ratio
         }
         st.success(f"分析完成！单品记录 {len(df_item)} 条。")
 
@@ -343,18 +343,19 @@ if st.session_state.computed_tables is not None:
 
                 if st.session_state.raw_dfs is not None:
                     df_item = st.session_state.raw_dfs['df_item']
-                    # 从 computed_tables 获取参数，因为 raw_dfs 中也可能有，但 computed_tables 更可靠
-                    total_qty = st.session_state.computed_tables.get('total_qty', 1)
-                    has_ratio = st.session_state.computed_tables.get('has_ratio', False)
+                    total_qty = st.session_state.raw_dfs.get('total_qty', 1)
+                    has_ratio = st.session_state.raw_dfs.get('has_ratio', False)
                     merged_new, unmatched_new = match_nickname(df_item, updated)
-                    agg_new = aggregate_by_nickname_with_qty(merged_new, total_qty, has_ratio)
-                    brand_new = brand_aggregate_with_qty(df_item, total_qty, has_ratio)
-                    st.session_state.computed_tables.update({
+                    agg_new = aggregate_by_nickname(merged_new, total_qty, has_ratio)
+                    brand_new = brand_aggregate(df_item, total_qty, has_ratio)
+                    st.session_state.computed_tables = {
+                        'df_item': df_item,
                         'merged_item': merged_new,
                         'agg_nickname': agg_new,
                         'brand_agg': brand_new,
-                        'unmatched': unmatched_new
-                    })
+                        'unmatched': unmatched_new,
+                        'has_ratio': has_ratio
+                    }
                     st.session_state.unmatched_df = unmatched_new
                     st.success(f"✅ 映射已更新！当前映射表共 {len(updated)} 条记录（新增 {len(new_mappings)} 条）。")
                     st.rerun()
