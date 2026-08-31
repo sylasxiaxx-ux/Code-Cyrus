@@ -27,7 +27,7 @@ if "mapping_source" not in st.session_state:
 # ---------- 加载默认映射表 ----------
 def load_default_mapping():
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    default_path = os.path.join(base_dir, "data", "竞品id匹配_0723updated.xlsx")
+    default_path = os.path.join(base_dir, "data", "id匹配_default.xlsx")
     if os.path.exists(default_path):
         try:
             df = pd.read_excel(default_path)
@@ -45,7 +45,7 @@ def load_default_mapping():
             st.warning(f"读取默认映射表失败: {e}")
             return False
     else:
-        st.info("未找到默认映射表 data/竞品id匹配_0723updated.xlsx，请上传映射表。")
+        st.info("未找到默认映射表 data/id匹配_default.xlsx，请上传映射表。")
         return False
 
 # ---------- 增强的 JSON 解析函数 ----------
@@ -107,16 +107,17 @@ def parse_preference_json(json_str, require_item=True):
         st.error(f"未找到数值字段（尝试了: {', '.join(value_candidates)}）")
         return None, None
 
+    # 数值列名统一为 "人数"
     df_data = {
         '品牌名': field_dict['brand_name'],
-        '偏好值': field_dict[value_field]
+        '人数': field_dict[value_field]   # 列名改为 "人数"
     }
     if require_item:
         df_data['单品'] = field_dict['item_name']
         df_data['ID'] = field_dict['item_id']
 
     df = pd.DataFrame(df_data)
-    df['偏好值'] = pd.to_numeric(df['偏好值'], errors='coerce')
+    df['人数'] = pd.to_numeric(df['人数'], errors='coerce')
 
     if require_item and '单品' in df.columns:
         df = df[df['单品'] != '-']
@@ -143,25 +144,25 @@ def match_nickname(df, id_nickname_df):
     return merged, unmatched
 
 # ---------- 按 nickname 汇总 ----------
-def aggregate_by_nickname(merged_df):
+def aggregate_by_nickname(merged_df, value_col):
     clean = merged_df[~merged_df['nickname'].isna() & (merged_df['nickname'] != '-')]
     if clean.empty:
-        return pd.DataFrame(columns=['nickname', '总偏好值'])
-    agg = clean.groupby('nickname', as_index=False)['偏好值'].sum().rename(columns={'偏好值':'总偏好值'})
-    agg = agg.sort_values('总偏好值', ascending=False)
+        return pd.DataFrame(columns=['nickname', f'总{value_col}'])
+    agg = clean.groupby('nickname', as_index=False)[value_col].sum().rename(columns={value_col: f'总{value_col}'})
+    agg = agg.sort_values(f'总{value_col}', ascending=False)
     agg.index = pd.RangeIndex(start=1, stop=len(agg)+1)
     return agg
 
 # ---------- 品牌汇总 ----------
-def brand_aggregate(df, value_label):
-    brand_agg = df.groupby('品牌名', as_index=False)['偏好值'].sum().rename(columns={'偏好值':'总' + value_label})
-    brand_agg = brand_agg.sort_values('总' + value_label, ascending=False)
+def brand_aggregate(df, value_col):
+    brand_agg = df.groupby('品牌名', as_index=False)[value_col].sum().rename(columns={value_col: f'总{value_col}'})
+    brand_agg = brand_agg.sort_values(f'总{value_col}', ascending=False)
     brand_agg.index = pd.RangeIndex(start=1, stop=len(brand_agg)+1)
     return brand_agg
 
 # ---------- 主界面 ----------
 with st.expander("📥 输入数据", expanded=True):
-    total_qty = st.number_input("总人数（可选，用于计算占比）", min_value=0, value=1, step=1000, help="输入总人数后，数值将除以总人数得到占比。若不需缩放，保持默认1。")
+    total_qty = st.number_input("总人数（可选，用于计算占比）", min_value=0, value=1, step=1000, help="输入总人数后，人数将除以总人数得到占比。若不需缩放，保持默认1。")
 
     brand_json = st.text_area(
         "📄 品牌偏好 JSON（可选，用于品牌汇总）",
@@ -178,7 +179,7 @@ with st.expander("📥 输入数据", expanded=True):
     )
 
     st.markdown("**📎 上传 id-nickname 映射表 (Excel)**")
-    st.caption("若不上传，将尝试从 data/竞品id匹配_0723updated.xlsx 读取默认映射表。")
+    st.caption("若不上传，将尝试从 data/id匹配_default.xlsx 读取默认映射表。")
     uploaded_mapping = st.file_uploader("必须包含 'id', '类目', 'nickname' 三列", type=["xlsx"], key="mapping_upload_two")
 
     if uploaded_mapping is not None:
@@ -198,10 +199,10 @@ with st.expander("📥 输入数据", expanded=True):
     else:
         if st.session_state.id_nickname_df is None:
             if load_default_mapping():
-                st.success(f"已加载默认映射表 (data/竞品id匹配_0723updated.xlsx)，共 {len(st.session_state.id_nickname_df)} 条记录。")
+                st.success(f"已加载默认映射表 (data/id匹配_default.xlsx)，共 {len(st.session_state.id_nickname_df)} 条记录。")
 
     if st.session_state.id_nickname_df is not None:
-        source = "上传" if st.session_state.mapping_source == 'uploaded' else "默认(data/竞品id匹配_0723updated.xlsx)"
+        source = "上传" if st.session_state.mapping_source == 'uploaded' else "默认(data/id匹配_default.xlsx)"
         st.info(f"✅ 当前映射表来源: {source}，共 {len(st.session_state.id_nickname_df)} 条记录。")
 
     run_btn = st.button("🚀 运行分析", type="primary")
@@ -211,7 +212,7 @@ if run_btn:
     if not item_json.strip():
         st.error("单品偏好 JSON 不能为空！")
     elif st.session_state.id_nickname_df is None:
-        st.error("请上传映射表或确保 data/竞品id匹配_0723updated.xlsx 存在。")
+        st.error("请上传映射表或确保 data/id匹配_default.xlsx 存在。")
     else:
         # 解析品牌 JSON（如果有）
         brand_agg = None
@@ -219,28 +220,31 @@ if run_btn:
             df_brand, value_field_brand = parse_preference_json(brand_json, require_item=False)
             if df_brand is not None:
                 if total_qty > 1:
-                    df_brand['偏好值'] = df_brand['偏好值'] / total_qty
-                brand_agg = brand_aggregate(df_brand, "占比" if total_qty > 1 else "偏好值")
+                    df_brand['人数'] = df_brand['人数'] / total_qty
+                    value_col_brand = "占比"
+                else:
+                    value_col_brand = "人数"
+                brand_agg = brand_aggregate(df_brand, value_col_brand)
 
         # 解析单品 JSON
         df_item, value_field_item = parse_preference_json(item_json, require_item=True)
         if df_item is None:
             st.stop()
 
-        # 应用缩放
+        # 确定数值列名（人数或占比）
         if total_qty > 1:
-            df_item['偏好值'] = df_item['偏好值'] / total_qty
-            value_label = "占比"
+            df_item['人数'] = df_item['人数'] / total_qty
+            value_col = "占比"
         else:
-            value_label = "偏好值"
+            value_col = "人数"
 
         # 匹配 nickname
         merged_item, unmatched = match_nickname(df_item, st.session_state.id_nickname_df)
-        agg_nickname = aggregate_by_nickname(merged_item)
+        agg_nickname = aggregate_by_nickname(merged_item, value_col)
 
         # 如果品牌 JSON 未提供，则从单品数据聚合品牌
         if brand_agg is None:
-            brand_agg = brand_aggregate(df_item, value_label)
+            brand_agg = brand_aggregate(df_item, value_col)
 
         # 保存结果
         st.session_state.raw_dfs = {
@@ -248,7 +252,7 @@ if run_btn:
             'merged_item': merged_item,
             'agg_nickname': agg_nickname,
             'brand_agg': brand_agg,
-            'value_label': value_label
+            'value_col': value_col
         }
         st.session_state.unmatched_df = unmatched
         st.session_state.computed_tables = {
@@ -257,7 +261,7 @@ if run_btn:
             'agg_nickname': agg_nickname,
             'brand_agg': brand_agg,
             'unmatched': unmatched,
-            'value_label': value_label
+            'value_col': value_col
         }
         st.success(f"分析完成！单品记录 {len(df_item)} 条。")
 
@@ -268,7 +272,7 @@ if st.session_state.computed_tables is not None:
     merged_item = tables['merged_item']
     agg_nickname = tables['agg_nickname']
     brand_agg = tables['brand_agg']
-    value_label = tables.get('value_label', '偏好值')
+    value_col = tables.get('value_col', '人数')   # 默认 '人数'
 
     # 未匹配编辑区域
     if len(unmatched) > 0:
@@ -340,15 +344,15 @@ if st.session_state.computed_tables is not None:
                 if st.session_state.raw_dfs is not None:
                     df_item = st.session_state.raw_dfs['df_item']
                     merged_new, unmatched_new = match_nickname(df_item, updated)
-                    agg_new = aggregate_by_nickname(merged_new)
-                    brand_new = brand_aggregate(df_item, value_label)
+                    agg_new = aggregate_by_nickname(merged_new, value_col)
+                    brand_new = brand_aggregate(df_item, value_col)
                     st.session_state.computed_tables = {
                         'df_item': df_item,
                         'merged_item': merged_new,
                         'agg_nickname': agg_new,
                         'brand_agg': brand_new,
                         'unmatched': unmatched_new,
-                        'value_label': value_label
+                        'value_col': value_col
                     }
                     st.session_state.unmatched_df = unmatched_new
                     st.success(f"✅ 映射已更新！当前映射表共 {len(updated)} 条记录（新增 {len(new_mappings)} 条）。")
@@ -357,14 +361,14 @@ if st.session_state.computed_tables is not None:
                     st.error("原始数据丢失，请重新运行分析。")
 
     # 显示结果
-    st.subheader(f"📊 品牌汇总（按总{value_label}降序）")
+    st.subheader(f"📊 品牌汇总（按总{value_col}降序）")
     st.dataframe(brand_agg)
 
     st.subheader("🛍️ 单品明细（含 nickname）")
-    # 注意：列名是 '偏好值'，而不是 value_label（value_label 仅用于标题）
-    st.dataframe(merged_item[['品牌名', '单品', 'nickname', '偏好值', 'ID']])
+    # 列名动态：value_col 可能是 "人数" 或 "占比"
+    st.dataframe(merged_item[['品牌名', '单品', 'nickname', value_col, 'ID']])
 
-    st.subheader(f"📈 按 nickname 汇总（总{value_label}）")
+    st.subheader(f"📈 按 nickname 汇总（总{value_col}）")
     st.dataframe(agg_nickname)
 
     if len(unmatched) == 0:
@@ -389,6 +393,6 @@ if st.session_state.computed_tables is not None:
         st.download_button(
             label="📥 下载映射表 (Excel)",
             data=output,
-            file_name=f"竞品id匹配_updated_{timestamp}.xlsx",
+            file_name=f"id匹配_updated_{timestamp}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
