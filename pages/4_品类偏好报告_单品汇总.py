@@ -110,7 +110,7 @@ def parse_preference_json(json_str, require_item=True):
     # 数值列名统一为 "人数"
     df_data = {
         '品牌名': field_dict['brand_name'],
-        '人数': field_dict[value_field]   # 列名改为 "人数"
+        '人数': field_dict[value_field]
     }
     if require_item:
         df_data['单品'] = field_dict['item_name']
@@ -220,7 +220,9 @@ if run_btn:
             df_brand, value_field_brand = parse_preference_json(brand_json, require_item=False)
             if df_brand is not None:
                 if total_qty > 1:
+                    # 缩放并重命名列
                     df_brand['人数'] = df_brand['人数'] / total_qty
+                    df_brand = df_brand.rename(columns={'人数': '占比'})
                     value_col_brand = "占比"
                 else:
                     value_col_brand = "人数"
@@ -231,9 +233,10 @@ if run_btn:
         if df_item is None:
             st.stop()
 
-        # 确定数值列名（人数或占比）
+        # 确定数值列名（人数或占比），并缩放 + 重命名
         if total_qty > 1:
             df_item['人数'] = df_item['人数'] / total_qty
+            df_item = df_item.rename(columns={'人数': '占比'})
             value_col = "占比"
         else:
             value_col = "人数"
