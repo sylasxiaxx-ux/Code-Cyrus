@@ -49,7 +49,7 @@ PROJECT_CATEGORIES = {
 }
 
 MAX_PER_PROJECT = 5
-MAX_PER_PERSON = 3
+MAX_PER_PERSON = 6
 
 try:
     ADMIN_PASSWORD = st.secrets["admin_password"]
