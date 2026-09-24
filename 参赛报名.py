@@ -392,7 +392,17 @@ def render_admin_page():
 
     st.divider()
 
-    st.subheader("📋 全部报名名单")
+    # 刷新按钮 + 标题
+    c1, c2 = st.columns([4, 1])
+    with c1:
+        st.subheader("📋 全部报名名单")
+    with c2:
+        if st.button("🔄 刷新数据", use_container_width=True, type="primary"):
+            st.rerun()
+
+    # 显示最后刷新时间
+    st.caption(f"最后刷新时间：{datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')}")
+
     df = get_all_registrations()
 
     if df.empty:
