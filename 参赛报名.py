@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo          # ← 新增
 import pandas as pd
 from io import BytesIO
 
@@ -56,6 +57,15 @@ except Exception:
     ADMIN_PASSWORD = "admin123"
 
 # ============================================================
+# 时区设置
+# ============================================================
+TZ = ZoneInfo("Asia/Hong_Kong")
+
+def now_str():
+    """返回当前时间的字符串（香港时区）"""
+    return datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+# ============================================================
 # 数据库
 # ============================================================
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -88,7 +98,6 @@ def init_db():
 
 
 def login_or_register(employee_id, name):
-    """工号唯一，已存在则用存储的姓名；否则新建。返回 (姓名, 是否新用户)"""
     conn = sqlite3.connect(DB_PATH, timeout=10)
     try:
         cur = conn.execute("SELECT name FROM employees WHERE employee_id = ?", (employee_id,))
@@ -97,7 +106,7 @@ def login_or_register(employee_id, name):
             return row[0], False
         conn.execute(
             "INSERT INTO employees (employee_id, name, created_at) VALUES (?, ?, ?)",
-            (employee_id, name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            (employee_id, name, now_str()),          # ← 使用 now_str()
         )
         conn.commit()
         return name, True
@@ -114,19 +123,16 @@ def get_counts():
 
 
 def register(employee_id, project):
-    """原子化报名。返回 (成功, 当前项目人数, 该人已报数, 状态码)"""
     conn = sqlite3.connect(DB_PATH, timeout=15, isolation_level=None)
     try:
         conn.execute("BEGIN IMMEDIATE")
 
-        # 项目满员检查
         cur = conn.execute("SELECT COUNT(*) FROM registrations WHERE project = ?", (project,))
         count = cur.fetchone()[0]
         if count >= MAX_PER_PROJECT:
             conn.execute("ROLLBACK")
             return False, count, 0, "project_full"
 
-        # 重复报名检查
         cur = conn.execute(
             "SELECT COUNT(*) FROM registrations WHERE project = ? AND employee_id = ?",
             (project, employee_id),
@@ -135,7 +141,6 @@ def register(employee_id, project):
             conn.execute("ROLLBACK")
             return False, count, 0, "duplicate"
 
-        # 个人上限检查
         cur = conn.execute(
             "SELECT COUNT(*) FROM registrations WHERE employee_id = ?", (employee_id,)
         )
@@ -146,7 +151,7 @@ def register(employee_id, project):
 
         conn.execute(
             "INSERT INTO registrations (employee_id, project, created_at) VALUES (?, ?, ?)",
-            (employee_id, project, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            (employee_id, project, now_str()),       # ← 使用 now_str()
         )
         conn.execute("COMMIT")
         return True, count + 1, person_count + 1, "ok"
@@ -264,7 +269,6 @@ def render_login_page():
 # 报名页面
 # ============================================================
 def render_registration_page():
-    # 顶部用户信息 + 退出
     c1, c2 = st.columns([4, 1])
     with c1:
         st.markdown(
@@ -279,7 +283,6 @@ def render_registration_page():
 
     st.divider()
 
-    # 报名结果提示
     if "reg_result" in st.session_state:
         r = st.session_state.pop("reg_result")
         if r["ok"]:
@@ -299,7 +302,6 @@ def render_registration_page():
             elif r["status"] == "duplicate":
                 st.warning(f"⚠️ 您已报名过 **{r['project']}**，无需重复报名。")
 
-    # 项目状态
     st.subheader("📊 各项目报名情况")
     counts = get_counts()
     for cat_name, cat_projects in PROJECT_CATEGORIES.items():
@@ -315,7 +317,6 @@ def render_registration_page():
 
     st.divider()
 
-    # 报名表单
     st.subheader("✍️ 提交报名")
     with st.form("register_form", clear_on_submit=True):
         project = st.selectbox("选择参赛项目", PROJECTS)
@@ -337,7 +338,6 @@ def render_registration_page():
 
     st.divider()
 
-    # 我的报名列表（可取消）
     st.subheader("📋 我的报名")
     rows = get_my_registrations(st.session_state.employee_id)
     if not rows:
@@ -371,7 +371,6 @@ def render_registration_page():
 def render_admin_page():
     st.subheader("🔐 管理员页面")
 
-    # 返回报名入口
     if st.button("← 返回报名页面"):
         st.session_state.page = "报名"
         st.rerun()
@@ -405,7 +404,6 @@ def render_admin_page():
         f"**{df['工号'].nunique()}** 位参赛者"
     )
 
-    # 按人汇总
     person_summary = df.groupby(["工号", "姓名"], as_index=False).agg(
         报名数量=("项目", "count"),
         报名项目=("项目", lambda x: " ｜ ".join(x)),
@@ -417,13 +415,12 @@ def render_admin_page():
     with tab2:
         st.dataframe(person_summary, use_container_width=True, hide_index=True)
 
-    # 导出 Excel
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="报名明细")
         person_summary.to_excel(writer, index=False, sheet_name="按人汇总")
     output.seek(0)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(TZ).strftime("%Y%m%d_%H%M%S")   # ← 使用 TZ
     st.download_button(
         label="📥 下载报名名单 (Excel，含明细和按人汇总)",
         data=output,
@@ -434,7 +431,6 @@ def render_admin_page():
 
     st.divider()
 
-    # 按项目统计
     st.subheader("📊 按项目统计")
     stat = df.groupby("项目").size().reset_index(name="报名人数")
     stat["状态"] = stat["报名人数"].apply(
