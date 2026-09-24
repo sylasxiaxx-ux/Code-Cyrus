@@ -13,26 +13,11 @@ st.set_page_config(page_title="参赛报名", page_icon="🏆", layout="wide")
 st.markdown(
     """
     <style>
-        /* 隐藏侧边栏的页面导航菜单 */
-        [data-testid="stSidebarNav"] {
-            display: none !important;
-        }
-        /* 隐藏侧边栏本身（可选，如果想彻底隐藏整个侧边栏） */
-        [data-testid="stSidebar"] {
-            display: none !important;
-        }
-        /* 隐藏侧边栏的折叠按钮 */
-        [data-testid="collapsedControl"] {
-            display: none !important;
-        }
-        /* 顶部工具栏（可选，隐藏 Deploy 等按钮） */
-        [data-testid="stToolbar"] {
-            display: none !important;
-        }
-        /* 底部 Streamlit 水印（可选） */
-        footer {
-            visibility: hidden;
-        }
+        [data-testid="stSidebarNav"] { display: none !important; }
+        [data-testid="stSidebar"] { display: none !important; }
+        [data-testid="collapsedControl"] { display: none !important; }
+        [data-testid="stToolbar"] { display: none !important; }
+        footer { visibility: hidden; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -63,7 +48,8 @@ PROJECT_CATEGORIES = {
     "🎯 执行赋能": PROJECTS[5:9],
 }
 
-MAX_PER_PROJECT = 5
+MAX_PER_PROJECT = 5      # 每个项目最多 5 人
+MAX_PER_PERSON = 3       # 每人最多报 3 个项目
 
 try:
     ADMIN_PASSWORD = st.secrets["admin_password"]
@@ -71,7 +57,7 @@ except Exception:
     ADMIN_PASSWORD = "admin123"   # ⚠️ 请在 Streamlit Secrets 中配置密码
 # ============================================================
 
-# ---------- 数据库路径（根目录下的 data/） ----------
+# ---------- 数据库路径 ----------
 _here = os.path.dirname(os.path.abspath(__file__))
 DB_DIR = os.path.join(_here, "data")
 os.makedirs(DB_DIR, exist_ok=True)
@@ -104,20 +90,48 @@ def get_counts():
 
 
 def register(project, name):
+    """
+    原子化报名，检查：
+      1. 项目是否满员
+      2. 该姓名是否已报满 3 个项目
+      3. 是否已报过此项目
+    返回 (是否成功, 当前项目人数, 该姓名已报数量, 状态码)
+    状态码: "ok" / "project_full" / "person_limit" / "duplicate"
+    """
     conn = sqlite3.connect(DB_PATH, timeout=15, isolation_level=None)
     try:
         conn.execute("BEGIN IMMEDIATE")
+
+        # 1. 检查项目满员
         cur = conn.execute("SELECT COUNT(*) FROM registrations WHERE project = ?", (project,))
         count = cur.fetchone()[0]
         if count >= MAX_PER_PROJECT:
             conn.execute("ROLLBACK")
-            return False, count
+            return False, count, 0, "project_full"
+
+        # 2. 检查是否已报过此项目
+        cur = conn.execute(
+            "SELECT COUNT(*) FROM registrations WHERE project = ? AND name = ?",
+            (project, name),
+        )
+        if cur.fetchone()[0] > 0:
+            conn.execute("ROLLBACK")
+            return False, count, 0, "duplicate"
+
+        # 3. 检查该姓名已报数量
+        cur = conn.execute("SELECT COUNT(*) FROM registrations WHERE name = ?", (name,))
+        person_count = cur.fetchone()[0]
+        if person_count >= MAX_PER_PERSON:
+            conn.execute("ROLLBACK")
+            return False, count, person_count, "person_limit"
+
+        # 4. 插入
         conn.execute(
             "INSERT INTO registrations (project, name, created_at) VALUES (?, ?, ?)",
             (project, name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         )
         conn.execute("COMMIT")
-        return True, count + 1
+        return True, count + 1, person_count + 1, "ok"
     except Exception:
         try:
             conn.execute("ROLLBACK")
@@ -216,19 +230,29 @@ st.divider()
 # ---------- 页面 1：报名 ----------
 # ============================================================
 def render_register_page():
+    # 显示上一次报名结果
     if "reg_result" in st.session_state:
         r = st.session_state.pop("reg_result")
         if r["ok"]:
             st.success(
                 f"✅ 报名成功！**{r['name']}** 已报名 **{r['project']}**"
-                f"（当前 {r['count']}/{MAX_PER_PROJECT}）"
+                f"（该项目 {r['count']}/{MAX_PER_PROJECT}，"
+                f"您已报 {r['person_count']}/{MAX_PER_PERSON} 个项目）"
             )
             st.balloons()
         else:
-            st.error(
-                f"❌ 报名失败：**{r['project']}** 已满"
-                f"（{r['count']}/{MAX_PER_PROJECT}），请选择其他项目。"
-            )
+            if r["status"] == "project_full":
+                st.error(
+                    f"❌ 报名失败：**{r['project']}** 已满"
+                    f"（{r['count']}/{MAX_PER_PROJECT}），请选择其他项目。"
+                )
+            elif r["status"] == "person_limit":
+                st.error(
+                    f"❌ 报名失败：您已报名 **{r['person_count']}/{MAX_PER_PERSON}** 个项目，"
+                    f"达到上限。如需报名新项目，请先在「取消报名」中撤销一个。"
+                )
+            elif r["status"] == "duplicate":
+                st.warning(f"⚠️ 您已报名过 **{r['project']}**，无需重复报名。")
 
     st.subheader("📊 各项目报名情况")
     counts = get_counts()
@@ -245,6 +269,35 @@ def render_register_page():
                     st.success(f"**{proj}**\n\n🟢 已报名  {cnt}/{MAX_PER_PROJECT}")
 
     st.divider()
+
+    # ---- 我的报名进度查询 ----
+    st.subheader("👤 我的报名进度")
+    st.caption(f"每人最多可报 **{MAX_PER_PERSON}** 个项目。")
+
+    check_name = st.text_input(
+        "输入姓名查询已报名数量",
+        max_chars=30,
+        placeholder="请输入您的姓名",
+        key="check_name_input",
+    )
+    if st.button("🔍 查询我的报名进度", key="check_progress_btn"):
+        check_name = check_name.strip()
+        if not check_name:
+            st.warning("⚠️ 请填写姓名")
+        else:
+            rows = get_registrations_by_name(check_name)
+            if not rows:
+                st.info(f"**{check_name}** 暂无报名记录，可报名 **{MAX_PER_PERSON}** 个项目。")
+            else:
+                st.info(
+                    f"**{check_name}** 已报名 **{len(rows)}/{MAX_PER_PERSON}** 个项目，"
+                    f"还可报 **{MAX_PER_PERSON - len(rows)}** 个。"
+                )
+                for reg_id, proj, ts in rows:
+                    st.markdown(f"- {proj}　<span style='color:gray;font-size:12px;'>（{ts}）</span>",
+                                unsafe_allow_html=True)
+
+    st.divider()
     st.subheader("✍️ 提交报名")
 
     with st.form("register_form", clear_on_submit=True):
@@ -259,21 +312,19 @@ def render_register_page():
         if not name:
             st.warning("⚠️ 请填写参赛人名称")
         else:
-            existing = [r[1] for r in get_registrations_by_name(name)]
-            if project in existing:
-                st.warning(f"⚠️ **{name}** 已报名过 **{project}**，无需重复报名。")
-            else:
-                try:
-                    ok, count = register(project, name)
-                    st.session_state["reg_result"] = {
-                        "ok": ok,
-                        "name": name,
-                        "project": project,
-                        "count": count,
-                    }
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"系统错误：{e}")
+            try:
+                ok, count, person_count, status = register(project, name)
+                st.session_state["reg_result"] = {
+                    "ok": ok,
+                    "name": name,
+                    "project": project,
+                    "count": count,
+                    "person_count": person_count,
+                    "status": status,
+                }
+                st.rerun()
+            except Exception as e:
+                st.error(f"系统错误：{e}")
 
 
 # ============================================================
@@ -281,7 +332,7 @@ def render_register_page():
 # ============================================================
 def render_cancel_page():
     st.subheader("❌ 取消报名")
-    st.caption("请输入报名时使用的姓名，查询并取消您的报名。")
+    st.caption("请输入报名时使用的姓名，查询并取消您的报名。取消后名额将释放给其他人。")
 
     cancel_name = st.text_input(
         "参赛人名称", max_chars=30, placeholder="请输入您的姓名", key="cancel_name_input"
@@ -300,7 +351,10 @@ def render_cancel_page():
         if not rows:
             st.info(f"未找到 **{qname}** 的报名记录。")
         else:
-            st.write(f"**{qname}** 的报名记录如下，点击「取消报名」可撤销：")
+            st.write(
+                f"**{qname}** 的报名记录如下（共 {len(rows)}/{MAX_PER_PERSON} 个），"
+                f"点击「取消报名」可撤销："
+            )
             for reg_id, proj, ts in rows:
                 c1, c2 = st.columns([5, 1])
                 with c1:
@@ -327,9 +381,7 @@ def render_admin_page():
         st.session_state.admin_authed = False
 
     if not st.session_state.admin_authed:
-        pwd = st.text_input(
-            "请输入管理员密码", type="password", key="admin_pwd_input"
-        )
+        pwd = st.text_input("请输入管理员密码", type="password", key="admin_pwd_input")
         if st.button("登录", type="primary"):
             if pwd == ADMIN_PASSWORD:
                 st.session_state.admin_authed = True
@@ -352,16 +404,30 @@ def render_admin_page():
         st.info("暂无报名记录。")
         return
 
-    st.caption(f"共 **{len(df)}** 条报名记录")
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.caption(f"共 **{len(df)}** 条报名记录，**{df['姓名'].nunique()}** 位参赛者")
 
+    # 按姓名聚合显示每人报名数量
+    person_summary = df.groupby("姓名").agg(
+        报名数量=("项目", "count"),
+        报名项目=("项目", lambda x: " ｜ ".join(x)),
+    ).reset_index()
+    person_summary = person_summary.sort_values("报名数量", ascending=False)
+
+    tab1, tab2 = st.tabs(["📋 明细列表", "👥 按人汇总"])
+    with tab1:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    with tab2:
+        st.dataframe(person_summary, use_container_width=True, hide_index=True)
+
+    # 导出 Excel（两个 sheet）
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="报名名单")
+        df.to_excel(writer, index=False, sheet_name="报名明细")
+        person_summary.to_excel(writer, index=False, sheet_name="按人汇总")
     output.seek(0)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     st.download_button(
-        label="📥 下载报名名单 (Excel)",
+        label="📥 下载报名名单 (Excel，含明细和按人汇总)",
         data=output,
         file_name=f"报名名单_{timestamp}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -389,4 +455,7 @@ else:
 
 
 st.divider()
-st.caption("📌 说明：报名按提交时间先后顺序，每个项目限 5 人，满员后无法再报名。")
+st.caption(
+    f"📌 说明：每个项目限 {MAX_PER_PROJECT} 人，每人最多报 {MAX_PER_PERSON} 个项目，"
+    "按提交时间先后顺序，满员后无法再报名。"
+)
