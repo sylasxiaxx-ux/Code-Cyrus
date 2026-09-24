@@ -5,7 +5,40 @@ from datetime import datetime
 import pandas as pd
 from io import BytesIO
 
+# ============================================================
+# 🔒 隐藏侧边栏导航（不显示 pages/ 下的程序）
+# ============================================================
 st.set_page_config(page_title="参赛报名", page_icon="🏆", layout="wide")
+
+st.markdown(
+    """
+    <style>
+        /* 隐藏侧边栏的页面导航菜单 */
+        [data-testid="stSidebarNav"] {
+            display: none !important;
+        }
+        /* 隐藏侧边栏本身（可选，如果想彻底隐藏整个侧边栏） */
+        [data-testid="stSidebar"] {
+            display: none !important;
+        }
+        /* 隐藏侧边栏的折叠按钮 */
+        [data-testid="collapsedControl"] {
+            display: none !important;
+        }
+        /* 顶部工具栏（可选，隐藏 Deploy 等按钮） */
+        [data-testid="stToolbar"] {
+            display: none !important;
+        }
+        /* 底部 Streamlit 水印（可选） */
+        footer {
+            visibility: hidden;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+# ============================================================
+
 st.title("🏆 参赛项目报名")
 
 # ============================================================
@@ -23,7 +56,6 @@ PROJECTS = [
     "【难度：★】项目九：Campaign 全周期复盘与知识复用",
 ]
 
-# 按业务分类展示
 PROJECT_CATEGORIES = {
     "🎯 生意竞品": PROJECTS[0:3],
     "🎯 人群破圈": PROJECTS[3:4],
@@ -33,17 +65,14 @@ PROJECT_CATEGORIES = {
 
 MAX_PER_PROJECT = 5
 
-# 管理员密码：优先从 Streamlit Secrets 读取，否则使用默认值
 try:
     ADMIN_PASSWORD = st.secrets["admin_password"]
 except Exception:
     ADMIN_PASSWORD = "admin123"   # ⚠️ 请在 Streamlit Secrets 中配置密码
 # ============================================================
 
-# ---------- 数据库路径（兼容根目录与 pages/ 目录） ----------
+# ---------- 数据库路径（根目录下的 data/） ----------
 _here = os.path.dirname(os.path.abspath(__file__))
-if os.path.basename(_here) == "pages":
-    _here = os.path.dirname(_here)
 DB_DIR = os.path.join(_here, "data")
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, "registrations.db")
@@ -75,7 +104,6 @@ def get_counts():
 
 
 def register(project, name):
-    """原子化报名（防止并发超额）。返回 (是否成功, 当前人数)"""
     conn = sqlite3.connect(DB_PATH, timeout=15, isolation_level=None)
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -112,7 +140,6 @@ def get_registrations_by_name(name):
 
 
 def cancel_registration(reg_id, name):
-    """取消报名（需校验姓名），返回 (是否成功, 项目名)"""
     conn = sqlite3.connect(DB_PATH, timeout=15, isolation_level=None)
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -318,7 +345,6 @@ def render_admin_page():
 
     st.divider()
 
-    # ---- 全部报名名单 ----
     st.subheader("📋 全部报名名单")
     df = get_all_registrations()
 
@@ -329,7 +355,6 @@ def render_admin_page():
     st.caption(f"共 **{len(df)}** 条报名记录")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-    # ---- 导出 Excel ----
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="报名名单")
@@ -345,7 +370,6 @@ def render_admin_page():
 
     st.divider()
 
-    # ---- 按项目统计 ----
     st.subheader("📊 按项目统计")
     stat = df.groupby("项目").size().reset_index(name="报名人数")
     stat["状态"] = stat["报名人数"].apply(
