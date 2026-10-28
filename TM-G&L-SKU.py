@@ -6,6 +6,9 @@ from io import BytesIO
 import openpyxl
 import os
 
+# ---------- 默认映射表路径（以后只需修改这一行） ----------
+DEFAULT_MAPPING_PATH = "data/id匹配_默认.xlsx"
+
 # ---------- 页面配置 ----------
 st.set_page_config(page_title="品牌/单品流入流出净值分析", layout="wide")
 st.title("📊 品牌/单品流入流出净值分析")
@@ -271,7 +274,7 @@ def compute_item_net_with_nickname(item_inflow, item_outflow, id_nickname_df):
 
 # ---------- 加载默认映射表 ----------
 def load_default_mapping():
-    default_path = "data/竞品id匹配_0723updated.xlsx"
+    default_path = DEFAULT_MAPPING_PATH
     if os.path.exists(default_path):
         try:
             df = pd.read_excel(default_path)
@@ -289,7 +292,7 @@ def load_default_mapping():
             st.warning(f"读取默认映射表失败: {e}")
             return False
     else:
-        st.info("未找到默认映射表 data/竞品id匹配_0723updated.xlsx，请上传映射表。")
+        st.info(f"未找到默认映射表 {DEFAULT_MAPPING_PATH}，请上传映射表。")
         return False
 
 # ---------- 主界面 ----------
@@ -306,7 +309,7 @@ with st.expander("📥 输入数据", expanded=True):
     json4 = st.text_area("📄 单品流入 JSON", height=50, key="json4", placeholder="粘贴单品流入的JSON数据...")
 
     st.markdown("**📎 上传 id-nickname 映射表 (Excel)**")
-    st.caption("若不上传，将尝试从 data/竞品id匹配_0723updated.xlsx 读取默认映射表。")
+    st.caption(f"若不上传，将尝试从 {DEFAULT_MAPPING_PATH} 读取默认映射表。")
     uploaded_file = st.file_uploader("必须包含 'id', '类目', 'nickname' 三列", type=["xlsx"], key="mapping_upload")
 
     if uploaded_file is not None:
@@ -326,10 +329,10 @@ with st.expander("📥 输入数据", expanded=True):
     else:
         if st.session_state.id_nickname_df is None:
             if load_default_mapping():
-                st.success(f"已加载默认映射表 (data/竞品id匹配_0723updated.xlsx)，共 {len(st.session_state.id_nickname_df)} 条记录。")
+                st.success(f"已加载默认映射表 ({DEFAULT_MAPPING_PATH})，共 {len(st.session_state.id_nickname_df)} 条记录。")
 
     if st.session_state.id_nickname_df is not None:
-        source = "上传" if st.session_state.mapping_source == 'uploaded' else "默认(data/竞品id匹配_0723updated.xlsx)"
+        source = "上传" if st.session_state.mapping_source == 'uploaded' else f"默认({DEFAULT_MAPPING_PATH})"
         st.info(f"✅ 当前映射表来源: {source}，共 {len(st.session_state.id_nickname_df)} 条记录。")
 
     run_btn = st.button("🚀 运行分析", type="primary")
@@ -350,7 +353,7 @@ if run_btn:
     if inflow_qty <= 0:
         errors.append("流入总人数必须大于0")
     if st.session_state.id_nickname_df is None:
-        errors.append("请先上传映射表或确保 data/竞品id匹配_0723updated.xlsx 存在")
+        errors.append(f"请先上传映射表或确保 {DEFAULT_MAPPING_PATH} 存在")
 
     if errors:
         for err in errors:
