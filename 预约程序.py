@@ -1,7 +1,7 @@
 import streamlit as st
 import sqlite3
 import os
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from zoneinfo import ZoneInfo
 import pandas as pd
 from io import BytesIO
@@ -156,7 +156,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown('<div class="main-header">🔧 设备调试时间预约</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">🔧 项目运行环境调试-时间预约</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="sub-header">选择合适的时间段，填写工号与姓名即可完成预约</div>',
     unsafe_allow_html=True,
@@ -184,23 +184,15 @@ TIME_SLOTS = [
     "18:00-19:00",
 ]
 
-START_DATE = date(2026, 10, 30)
-EXCLUDE_DATES = {date(2026, 11, 2), date(2026, 11, 3), date(2026, 11, 4)}
-TARGET_DAYS = 4
+# ✅ 固定 4 天：10-30、11-02、11-03、11-04
+AVAILABLE_DATES = [
+    date(2026, 10, 30),   # 周五
+    date(2026, 11, 2),    # 周一
+    date(2026, 11, 3),    # 周二
+    date(2026, 11, 4),    # 周三
+]
+
 WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-
-
-def get_available_dates():
-    dates = []
-    d = START_DATE
-    while len(dates) < TARGET_DAYS:
-        if d.weekday() < 5 and d not in EXCLUDE_DATES:
-            dates.append(d)
-        d += timedelta(days=1)
-    return dates
-
-
-AVAILABLE_DATES = get_available_dates()
 
 try:
     ADMIN_PASSWORD = st.secrets["admin_password"]
@@ -215,7 +207,7 @@ if os.path.basename(_here) == "pages":
     _here = os.path.dirname(_here)
 DB_DIR = os.path.join(_here, "data")
 os.makedirs(DB_DIR, exist_ok=True)
-DB_PATH = os.path.join(DB_DIR, "equipment_reservations.db")
+DB_PATH = os.path.join(DB_DIR, "env_debug_reservations.db")
 
 
 def init_db():
@@ -462,7 +454,6 @@ def render_my_reservation_card():
 
     row = get_my_reservation(eid)
     if row is None:
-        # 预约已被取消
         st.session_state.my_employee_id = None
         return
 
@@ -511,7 +502,6 @@ def render_grid(reservations):
     n_dates = len(AVAILABLE_DATES)
     col_weights = [1.3] + [1] * n_dates
 
-    # key="grid" 生成 .st-key-grid 作用域，用于统一高度对齐
     with st.container(key="grid"):
         # ---------- 表头 ----------
         header_cols = st.columns(col_weights)
@@ -531,14 +521,12 @@ def render_grid(reservations):
         for slot in TIME_SLOTS:
             row_cols = st.columns(col_weights)
 
-            # 第一列：时间段（固定 46px 高度）
             with row_cols[0]:
                 st.markdown(
                     f'<div class="grid-slot">{slot}</div>',
                     unsafe_allow_html=True,
                 )
 
-            # 其余列：预约按钮
             for i, d in enumerate(AVAILABLE_DATES):
                 date_str = d.strftime("%Y-%m-%d")
                 key = (date_str, slot)
@@ -571,13 +559,11 @@ def render_grid(reservations):
 # 主页面
 # ============================================================
 def render_reservation_page():
-    # 预约成功提示
     if "reserve_result" in st.session_state:
         r = st.session_state.pop("reserve_result")
         st.success(f"✅ 预约成功！**{r['date']} {r['slot']}**（{r['name']}）")
         st.balloons()
 
-    # 自动显示"我的预约"
     render_my_reservation_card()
 
     st.markdown("### 📅 可预约时段")
@@ -586,13 +572,11 @@ def render_reservation_page():
     reservations = get_all_reservations()
     render_grid(reservations)
 
-    # 弹窗
     if "dialog_slot" in st.session_state:
         reservation_dialog(*st.session_state["dialog_slot"])
 
     st.divider()
 
-    # 换设备 / 刷新后找回
     with st.expander("🔍 换设备 / 刷新后找回我的预约"):
         st.caption("如果换设备或刷新后看不到「我的预约」，可输入工号找回。")
         qid = st.text_input("工号", max_chars=30, key="query_eid", placeholder="请输入您的工号")
@@ -695,7 +679,7 @@ def render_admin_page():
     st.download_button(
         label="📥 下载预约表 (Excel，含明细和时段总览)",
         data=output,
-        file_name=f"设备调试预约表_{timestamp}.xlsx",
+        file_name=f"项目运行环境调试预约表_{timestamp}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
