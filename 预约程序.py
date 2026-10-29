@@ -31,8 +31,10 @@ st.title("🔧 设备调试时间预约")
 # ============================================================
 TZ = ZoneInfo("Asia/Hong_Kong")
 
+
 def now_str():
     return datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+
 
 # ============================================================
 # 配置区
@@ -114,13 +116,7 @@ def get_all_reservations():
 
 
 def reserve(employee_id, name, date_str, time_slot):
-    """
-    原子化预约：
-      - 检查时段是否被占用
-      - 检查该工号是否已有预约（一人只能约一个时段）
-      - 员工不存在则自动登记
-    返回 (成功, 状态码)
-    """
+    """原子化预约。返回 (成功, 状态码)"""
     conn = sqlite3.connect(DB_PATH, timeout=15, isolation_level=None)
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -142,7 +138,7 @@ def reserve(employee_id, name, date_str, time_slot):
             conn.execute("ROLLBACK")
             return False, "already_reserved"
 
-        # 3. 员工不存在则登记（工号唯一，姓名以首次为准）
+        # 3. 员工不存在则登记
         cur = conn.execute(
             "SELECT name FROM employees WHERE employee_id = ?", (employee_id,)
         )
@@ -226,7 +222,7 @@ def get_all_reservations_df():
 init_db()
 
 # ============================================================
-# session_state 初始化
+# session_state
 # ============================================================
 if "page" not in st.session_state:
     st.session_state.page = "预约"
@@ -238,15 +234,28 @@ if "admin_authed" not in st.session_state:
 # ============================================================
 @st.dialog("填写预约信息")
 def reservation_dialog(date_str, slot):
-    st.markdown(f"**{date_str}　{slot}**")
-    st.caption("请填写工号和姓名，提交后该时段即被占用。")
+    weekday = WEEKDAY_CN[datetime.strptime(date_str, "%Y-%m-%d").weekday()]
 
-    employee_id = st.text_input("工号", max_chars=30, key="dlg_eid")
-    name = st.text_input("姓名", max_chars=30, key="dlg_name")
+    # —— 弹窗内展示所选时段信息 ——
+    st.markdown(
+        f"""
+        <div style="background:#f0f2f6;padding:12px;border-radius:8px;margin-bottom:12px;">
+            <div style="font-size:13px;color:#666;">您选择的时间段</div>
+            <div style="font-size:18px;font-weight:600;">{date_str}（{weekday}）</div>
+            <div style="font-size:16px;font-weight:600;color:#1f77b4;">{slot}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    employee_id = st.text_input("工号", max_chars=30, key="dlg_eid", placeholder="请输入工号")
+    name = st.text_input("姓名", max_chars=30, key="dlg_name", placeholder="请输入姓名")
+
+    st.caption("📌 每个工号仅可预约一个时间段。")
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("确认预约", type="primary", use_container_width=True):
+        if st.button("✅ 确认预约", type="primary", use_container_width=True):
             eid = employee_id.strip()
             nm = name.strip()
             if not eid:
@@ -271,7 +280,7 @@ def reservation_dialog(date_str, slot):
                         elif status == "already_reserved":
                             st.error(
                                 "❌ 该工号已预约过其他时段。"
-                                "请在页面下方「查询/取消我的预约」中取消后再约。"
+                                "请在页面下方「查询 / 取消我的预约」中取消后再约。"
                             )
                 except Exception as e:
                     st.error(f"系统错误：{e}")
@@ -282,59 +291,88 @@ def reservation_dialog(date_str, slot):
 
 
 # ============================================================
+# 预约网格（横列日期，纵列时间段）
+# ============================================================
+def render_grid(reservations):
+    n_dates = len(AVAILABLE_DATES)
+
+    # 列宽：时间段列稍宽，日期列等宽
+    col_weights = [1.3] + [1] * n_dates
+
+    # ---------- 表头行 ----------
+    header_cols = st.columns(col_weights)
+    with header_cols[0]:
+        st.markdown(
+            "<div style='padding:8px 0;font-weight:600;'>时间段</div>",
+            unsafe_allow_html=True,
+        )
+    for i, d in enumerate(AVAILABLE_DATES):
+        with header_cols[i + 1]:
+            st.markdown(
+                f"<div style='text-align:center;padding:8px 0;'>"
+                f"<div style='font-weight:600;'>{d.strftime('%m-%d')}</div>"
+                f"<div style='font-size:12px;color:#888;'>{WEEKDAY_CN[d.weekday()]}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+    # ---------- 每个时间段一行 ----------
+    for slot in TIME_SLOTS:
+        row_cols = st.columns(col_weights)
+
+        # 第一列：时间段
+        with row_cols[0]:
+            st.markdown(
+                f"<div style='padding:10px 0;font-weight:500;'>{slot}</div>",
+                unsafe_allow_html=True,
+            )
+
+        # 后续列：每天一个按钮
+        for i, d in enumerate(AVAILABLE_DATES):
+            date_str = d.strftime("%Y-%m-%d")
+            key = (date_str, slot)
+            with row_cols[i + 1]:
+                if key in reservations:
+                    st.button(
+                        "🔴 已预约",
+                        key=f"btn_{date_str}_{slot}",
+                        disabled=True,
+                        use_container_width=True,
+                    )
+                else:
+                    if st.button(
+                        "🟢 可预约",
+                        key=f"btn_{date_str}_{slot}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.pop("dlg_eid", None)
+                        st.session_state.pop("dlg_name", None)
+                        st.session_state["dialog_slot"] = (date_str, slot)
+                        st.rerun()
+
+
+# ============================================================
 # 主页面
 # ============================================================
 def render_reservation_page():
-    # 上次预约结果提示
     if "reserve_result" in st.session_state:
         r = st.session_state.pop("reserve_result")
-        st.success(
-            f"✅ 预约成功！**{r['date']} {r['slot']}**（{r['name']}）"
-        )
+        st.success(f"✅ 预约成功！**{r['date']} {r['slot']}**（{r['name']}）")
         st.balloons()
 
     st.subheader("📅 可预约时段")
-    st.caption("🟢 点击空闲时段填写工号和姓名即可预约 ｜ 🔴 已被预约")
+    st.caption("🟢 点击空闲格子填写工号和姓名即可预约 ｜ 🔴 已被预约")
 
     reservations = get_all_reservations()
+    render_grid(reservations)
 
-    tabs = st.tabs(
-        [f"{d.strftime('%Y-%m-%d')}（{WEEKDAY_CN[d.weekday()]}）" for d in AVAILABLE_DATES]
-    )
-
-    for tab, d in zip(tabs, AVAILABLE_DATES):
-        with tab:
-            date_str = d.strftime("%Y-%m-%d")
-            cols = st.columns(3)
-            for j, slot in enumerate(TIME_SLOTS):
-                with cols[j % 3]:
-                    key = (date_str, slot)
-                    if key in reservations:
-                        st.button(
-                            f"🔴 {slot}（已预约）",
-                            key=f"btn_{date_str}_{slot}",
-                            disabled=True,
-                            use_container_width=True,
-                        )
-                    else:
-                        if st.button(
-                            f"🟢 {slot}",
-                            key=f"btn_{date_str}_{slot}",
-                            use_container_width=True,
-                        ):
-                            # 打开弹窗前清空上次输入
-                            st.session_state.pop("dlg_eid", None)
-                            st.session_state.pop("dlg_name", None)
-                            st.session_state["dialog_slot"] = (date_str, slot)
-                            st.rerun()
-
-    # 若存在待填写的时段，则弹出对话框
+    # 弹窗
     if "dialog_slot" in st.session_state:
         reservation_dialog(*st.session_state["dialog_slot"])
 
     st.divider()
 
-    # ========== 查询 / 取消我的预约 ==========
+    # ---------- 查询 / 取消我的预约 ----------
     st.subheader("🔍 查询 / 取消我的预约")
     st.caption("输入工号查询您的预约，可取消后重新预约其他时段。")
 
