@@ -9,7 +9,7 @@ from io import BytesIO
 # ============================================================
 # 页面配置 + 隐藏侧边栏
 # ============================================================
-st.set_page_config(page_title="设备调试预约", page_icon="🔧", layout="wide")
+st.set_page_config(page_title="项目运行环境调试-时间预约", page_icon="🔧", layout="wide")
 
 st.markdown(
     """
